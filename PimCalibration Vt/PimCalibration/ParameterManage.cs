@@ -23,7 +23,7 @@ namespace PimCalibration
         }
 
         /// <summary>
-        /// 
+        /// 导入配置
         /// </summary>
         /// <param name="iniPath"></param>
         public static void LoadConfiguration(string iniPath)
@@ -64,30 +64,44 @@ namespace PimCalibration
 
             try
             {
-                str = IniFile.GetString("setting", "freq", string.Empty).Replace("mhz", string.Empty);
-                tx.freq.AddRange(ArrayString2IntArray(str.Split(new char[1] { ',' })));
+                for (int i = 0; i < 2; i++)
+                {
+                    str = IniFile.GetString("tx"+(i+1).ToString()       , "freq", string.Empty).Replace("mhz", string.Empty);                
+                    tx.PA[i].freq.AddRange(ArrayString2IntArray(str.Split(new char[] { ',' })));
 
-                str = IniFile.GetString("setting", "power", string.Empty).Replace("dbm", string.Empty);
-                tx.power.AddRange(ArrayString2FloatArray(str.Split(new char[1] { ',' })));
+                    str = IniFile.GetString("tx" + (i + 1).ToString()   , "power", string.Empty).Replace("dbm", string.Empty);
+                    tx.PA[i].power.AddRange(ArrayString2FloatArray(str.Split(new char[] { ',' })));
 
-                str = IniFile.GetString("setting", "poweratt", string.Empty).Replace("db", string.Empty);
-                tx.powerAtt.AddRange(ArrayString2FloatArray(str.Split(new char[1] { ',' })));
+                    int cnt1 = tx.PA[i].power.Count;
 
-                str = IniFile.GetString("setting", "powerfloat", string.Empty).Replace("db", string.Empty);
-                tx.powerFloat.AddRange(ArrayString2FloatArray(str.Split(new char[1] { ',' })));
+                    str = IniFile.GetString("tx" + (i + 1).ToString()   , "poweratt", string.Empty).Replace("db", string.Empty);
+                    tx.PA[i].powerAtt.AddRange(ArrayString2FloatArray(str.Split(new char[] { ',' })));
+
+                    int cnt2 = tx.PA[i].powerAtt.Count;
+
+                    str = IniFile.GetString("tx"+(i+1).ToString()       , "powerfloat", string.Empty).Replace("db", string.Empty);
+                    tx.PA[i].powerFloat.AddRange(ArrayString2FloatArray(str.Split(new char[] { ',' })));
+
+                    int cnt3 = tx.PA[i].powerFloat.Count;
+
+                    if(cnt1 != cnt2 || cnt1 != cnt3 || cnt2 != cnt3)
+                    {
+                        throw new Exception("发信配置文件中,[功率 衰减 精度] 参数个数不相等!");                        
+                    }
+                }
+
+                tx.PowerOffsetLow = float.Parse(IniFile.GetString("couple", "poweroffsetlow", string.Empty).Replace("db", string.Empty));
+                tx.PowerOffsetHigh = float.Parse(IniFile.GetString("couple", "poweroffsethigh", string.Empty).Replace("db", string.Empty));
+                tx.PowerOffsetSwitch = float.Parse(IniFile.GetString("couple", "poweroffsetswitch", string.Empty).Replace("dbm", string.Empty));
 
                 tx.SampleCnt = int.Parse(IniFile.GetString("setting", "sampleCount", string.Empty));
                 tx.SampleDelay = int.Parse(IniFile.GetString("setting", "sampleDelay", string.Empty));
                 tx.SampleOnly = bool.Parse(IniFile.GetString("setting", "sampleOnly", string.Empty));
 
-                tx.PowerOffsetLow = float.Parse(IniFile.GetString("setting", "poweroffsetlow", string.Empty).Replace("db", string.Empty));
-                tx.PowerOffsetHigh = float.Parse(IniFile.GetString("setting", "poweroffsethigh", string.Empty).Replace("db", string.Empty));
-                tx.PowerOffsetSwitch = float.Parse(IniFile.GetString("setting", "poweroffsetswitch", string.Empty).Replace("dbm", string.Empty));
-
                 tx.PA1Addr = int.Parse(IniFile.GetString("setting", "compa1", string.Empty));
                 tx.PA2Addr = int.Parse(IniFile.GetString("setting", "compa2", string.Empty));
                 tx.CycleCnt = int.Parse(IniFile.GetString("setting", "cycleCnt", string.Empty));
-                tx.CalDelay = int.Parse(IniFile.GetString("setting", "CalDelay", string.Empty));
+                tx.CalDelay = int.Parse(IniFile.GetString("setting", "calDelay", string.Empty));
                 tx.PAformule = int.Parse(IniFile.GetString("setting", "PAformule", string.Empty));
                 tx.Step = float.Parse(IniFile.GetString("setting", "step", string.Empty));
                 tx.InsType = IniFile.GetString("setting", "device", string.Empty);
@@ -97,26 +111,38 @@ namespace PimCalibration
             {
                 throw ex;
             }
+
+            for (int i = 0; i < 2; i++)
+			{
+                for (int j = 0; j < 50; j++)
+                {
+                    for (int k = 0; k < 50; k++)
+                    {
+                        tx.errCollect[i, j, k] = false;
+                    }
+                }
+			}
+
             //ci.comMask = new string[] { "COM" + tx.PA1Addr.ToString(), "COM" + tx.PA2Addr.ToString() };
 
-            txInfo = "<Power Meter>: " + tx.InsType + "\r\n" +
-                           "<PA Type>: " + tx.PAType + "\r\n" +
-                           "<Calibration Power Point Count>:" + tx.power.Count.ToString() + "\r\n";                       
+            //txInfo = "<Power Meter>: " + tx.InsType + "\r\n" +
+            //               "<PA Type>: " + tx.PAType + "\r\n" +
+            //               "<Calibration Power Point Count>:" + tx.power.Count.ToString() + "\r\n";                       
 
-            txInfo +="<Powe Table>:\r\n";
+            //txInfo +="<Powe Table>:\r\n";
 
-            for (int i = 0; i < tx.power.Count; i++)
-            {
-                txInfo += tx.power[i].ToString() + "dBm ";
-            }
+            //for (int i = 0; i < tx.power.Count; i++)
+            //{
+            //    txInfo += tx.power[i].ToString() + "dBm ";
+            //}
 
-            txInfo += "<Calibration Freq Point Count>:" + tx.freq.Count.ToString() + "\r\n";
-            txInfo += "<Frequcene Table>:\r\n";
+            //txInfo += "<Calibration Freq Point Count>:" + tx.freq.Count.ToString() + "\r\n";
+            //txInfo += "<Frequcene Table>:\r\n";
 
-            for (int i = 0; i < tx.freq.Count; i++)
-            {
-                txInfo += tx.freq[i].ToString() + "MHz ";
-            }
+            //for (int i = 0; i < tx.freq.Count; i++)
+            //{
+            //    txInfo += tx.freq[i].ToString() + "MHz ";
+            //}
         }
 
         public static void LoadTxCalibPara(string iniPath)
@@ -129,7 +155,7 @@ namespace PimCalibration
             
             for (int i = 0; i < 2; i++)
             {
-                for (int j = 0; j < tx.power.Count; j++)
+                for (int j = 0; j < tx.PA[i].power.Count; j++)
                 {
                     string str = IniFile.GetString("pim_signal_" + (i + 1).ToString(), "tx_row_"+(j+1).ToString(), string.Empty);
                     float[] ft = ArrayString2FloatArray(str.Split(new char[1] { ',' }));
@@ -278,17 +304,17 @@ namespace PimCalibration
             //pim_signal_1,pim_signal_2
             for (int i = 1; i < 3; i++)
             {
-                IniFile.SetString("pim_signal_" + i.ToString(), "tx_p", ArrayFloat2String(tx.power.ToArray()));
-                IniFile.SetString("pim_signal_" + i.ToString(), "tx_f", ArrayInt2String(tx.freq.ToArray()));
+                IniFile.SetString("pim_signal_" + i.ToString(), "tx_p", ArrayFloat2String(tx.PA[i - 1].power.ToArray()));
+                IniFile.SetString("pim_signal_" + i.ToString(), "tx_f", ArrayInt2String(tx.PA[i-1].freq.ToArray()));
 
-                IniFile.SetString("pim_offset_" + i.ToString(), "tx_p", ArrayFloat2String(tx.power.ToArray()));
-                IniFile.SetString("pim_offset_" + i.ToString(), "tx_f", ArrayInt2String(tx.freq.ToArray()));
+                IniFile.SetString("pim_offset_" + i.ToString(), "tx_p", ArrayFloat2String(tx.PA[i - 1].power.ToArray()));
+                IniFile.SetString("pim_offset_" + i.ToString(), "tx_f", ArrayInt2String(tx.PA[i-1].freq.ToArray()));
 
-                for (int j = 0; j < tx.power.Count; j++)
+                for (int j = 0; j < tx.PA[i - 1].power.Count; j++)
                 {
-                    float[] pr = new float[tx.freq.Count];
+                    float[] pr = new float[tx.PA[i - 1].freq.Count];
 
-                    for (int k = 0; k < tx.freq.Count; k++)
+                    for (int k = 0; k < tx.PA[i - 1].freq.Count; k++)
                     {
                         pr[k] = tx.powerDisp[i - 1, k, j];
                     }
@@ -304,17 +330,17 @@ namespace PimCalibration
             //pim_signal_1,pim_signal_2
             for (int i = 1; i < 3; i++)
 			{
-                IniFile.SetString("pim_signal_" + i.ToString(), "tx_p",ArrayFloat2String(tx.power.ToArray()));
-                IniFile.SetString("pim_signal_" + i.ToString(), "tx_f",ArrayInt2String(tx.freq.ToArray()));
+                IniFile.SetString("pim_signal_" + i.ToString(), "tx_p", ArrayFloat2String(tx.PA[i - 1].power.ToArray()));
+                IniFile.SetString("pim_signal_" + i.ToString(), "tx_f",ArrayInt2String(tx.PA[i-1].freq.ToArray()));
 
-                IniFile.SetString("pim_offset_" + i.ToString(), "tx_p", ArrayFloat2String(tx.power.ToArray()));
-                IniFile.SetString("pim_offset_" + i.ToString(), "tx_f", ArrayInt2String(tx.freq.ToArray()));
+                IniFile.SetString("pim_offset_" + i.ToString(), "tx_p", ArrayFloat2String(tx.PA[i - 1].power.ToArray()));
+                IniFile.SetString("pim_offset_" + i.ToString(), "tx_f", ArrayInt2String(tx.PA[i-1].freq.ToArray()));
 
-                for (int j = 0; j < tx.power.Count; j++)
+                for (int j = 0; j < tx.PA[i - 1].power.Count; j++)
                 {
-                    float[] pr = new float[tx.freq.Count];
+                    float[] pr = new float[tx.PA[i - 1].freq.Count];
 
-                    for (int k = 0; k < tx.freq.Count; k++)
+                    for (int k = 0; k < tx.PA[i - 1].freq.Count; k++)
                     {
                         pr[k] = tx.powerCalib[i - 1, k, j];
                     }
@@ -385,16 +411,17 @@ namespace PimCalibration
 
             StreamWriter sw = File.CreateText(iniPath);
 
-            sw.WriteLine("//以下是未校准的功率点，注意每一行描述了一个点的信息。");
-
-            foreach( float freq in tx.errCollect1.Keys )
+            for (int i = 0; i < tx.PA.Length; i++)
             {
-                sw.WriteLine("==>PA1  FREQ: " + freq.ToString() + "  POWER:"+ tx.errCollect1[freq].ToString());            
-            }
-
-            foreach (float freq in tx.errCollect2.Keys)
-            {
-                sw.WriteLine("==>PA2  FREQ: " + freq.ToString() + "  POWER:" + tx.errCollect2[freq].ToString());
+                for (int j = 0; j < tx.PA[i].freq.Count; j++)
+                {
+                    for (int k = 0; k < tx.PA[i].power.Count; k++)
+                    {
+                        if(tx.errCollect[i,j,k])
+                            sw.WriteLine(DateTime.Now.ToLocalTime() + 
+                                "  ==>PA["+(i+1).ToString()+"] Failed  FREQ:" + tx.PA[i].freq[j].ToString() + "  POWER:" + tx.PA[i].power[k].ToString());
+                    }
+                }                
             }
 
             sw.Dispose();

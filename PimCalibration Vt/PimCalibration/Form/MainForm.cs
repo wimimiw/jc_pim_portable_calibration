@@ -9,21 +9,27 @@ using System.Windows.Forms;
 using System.Threading;
 using SpectrumLib;
 using System.IO.Ports;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 
 namespace PimCalibration
 {
     public partial class MainForm : Form
     {
         #region 变量
-        private ManualResetEvent handleSpecNormal = new ManualResetEvent(false);
-        private ManualResetEvent handleSpecError = new ManualResetEvent(false);
-        private ManualResetEvent handlePARev = new ManualResetEvent(false);
+        private ManualResetEvent __handleSpecNormal = new ManualResetEvent(false);
+        private ManualResetEvent __handleSpecError = new ManualResetEvent(false);
+        private ManualResetEvent __handlePARev = new ManualResetEvent(false);        
         //private ManualResetEvent handleThrdAbort = new ManualResetEvent(false);
-        private bool txStartValid = false;
+        private bool __txStartValid = false;
         //private bool rxStartValid = false;
-        private int timeCnt = 0;
+        private int __timeCnt = 0;
         private Spectrum __specObj = null;        
-        private const string NoACK = "==>PA NO ACK!";
+        private const string __NoACK = "==>PA NO ACK!";
+        private bool __bTxCalRun = false;
+        private bool __bRxCalRun = false;
+        private object __threadLock = new object();
 
         private enum ButtonSwitchStatus
         {
@@ -52,7 +58,7 @@ namespace PimCalibration
             }
             catch (Exception ex)
             {
-                MessageBox.Show("tx_calib.ini has error!");
+                MessageBox.Show(ex.Message);
             }
 
             try
@@ -78,7 +84,7 @@ namespace PimCalibration
             //ParameterManage.SaveTxChannelPara(Application.StartupPath);
             //ParameterManage.SaveRxChannelPara(Application.StartupPath);
 
-            this.Text = ParameterManage.ci.formTitle;
+            this.Text = Assembly.GetExecutingAssembly().GetName().Name + "  " + Assembly.GetEntryAssembly().GetName().Version;
             this.tbDisplay.Text = ParameterManage.txInfo;
             
             this.rbTX.Select();
@@ -92,14 +98,6 @@ namespace PimCalibration
             //ButtonSwitch(ButtonSwitchStatus.CheckPass);
         }
 
-        private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
-        {
-            if (__specObj != null)
-            {
-                __specObj = null;
-            }
-        }
-
         #endregion
 
         #region 捕获窗口线程消息
@@ -111,33 +109,33 @@ namespace PimCalibration
         {
             if (m.Msg == MessageID.SPECTRUEME_SUCCED)
             {
-                handleSpecNormal.Set();                
+                __handleSpecNormal.Set();                
             }
             if (m.Msg == MessageID.SPECTRUM_ERROR)
             {
-                handleSpecError.Set();                
+                __handleSpecError.Set();                
             }
             if (m.Msg == MessageID.RF_SUCCED_ALL)
             {
                 if (m.WParam.ToInt32() == ParameterManage.tx.PA1Addr)
                 {
-                    handlePARev.Set();
+                    __handlePARev.Set();
                 }
                 if (m.WParam.ToInt32() == ParameterManage.tx.PA2Addr)
                 {
-                    handlePARev.Set();
+                    __handlePARev.Set();
                 }
             }
             else if (m.Msg == MessageID.RF_ERROR)
             {
                 if (m.WParam.ToInt32() == ParameterManage.tx.PA1Addr)
                 {
-                    handlePARev.Set();
+                    __handlePARev.Set();
                 }
 
                 if (m.WParam.ToInt32() == ParameterManage.tx.PA2Addr)
                 {
-                    handlePARev.Set();
+                    __handlePARev.Set();
                 }
             }
             else
@@ -146,7 +144,40 @@ namespace PimCalibration
         #endregion        
 
         #region 功放校准
+
+        #region 发信校准
         /// <summary>
+        /// 中断校准
+        /// </summary>
+        /// <param name="addr"></param>
+        /// <param name="pm"></param>
+        private void TxCaliStopDuring(int addr,PowerMeter pm)
+        {
+            //ParameterManage.SaveTxChannelPara(Application.StartupPath);      
+            //ParameterManage.SaveTxFailedData(Application.StartupPath);
+            MessageBox.Show(this,"中断退出！注意，不保存任何数据！","",MessageBoxButtons.OK,MessageBoxIcon.Stop);
+
+            int Lvl = ParameterManage.tx.RFPriority;
+            RFSignal.RFClear(addr, Lvl);
+            RFSignal.RFOff(addr, Lvl);
+            RFSignal.RFStart(addr);
+
+            if (!__handlePARev.WaitOne(4000))
+            {
+                MessageBox.Show("无法关闭功放，请使用OMT关闭功放，串口号"+addr.ToString(),"",MessageBoxButtons.OK,MessageBoxIcon.Error);
+            }
+
+            RFSignal.RFFinalize();
+
+            pm.Dispose();
+
+            PrintListInfo("==>Calibration is Stop!");
+            PrintListInfo("Exit...");
+            ButtonSwitch(ButtonSwitchStatus.Calibrated);
+
+            this.BeginInvoke(new MethodInvoker(delegate { this.Close(); }));
+        }
+        /// <summary>功放通道处理函数
         /// 功放通道处理函数
         /// </summary>
         /// <param name="addr"></param>
@@ -154,25 +185,36 @@ namespace PimCalibration
         private bool TxCalibChannel(int addr,PowerMeter pm,TxCalDataStruct.EPowerDivide ed)
         {
             int dispNum = addr - Math.Min(ParameterManage.tx.PA1Addr, ParameterManage.tx.PA2Addr) + 1;
-            PrintInfo2UI("==>Start Calibrate PA" + dispNum.ToString()+"...");
+            PrintListInfo("==>Start Calibrate [PA" + dispNum.ToString()+"]...");
 
-            int Lvl = ParameterManage.tx.RFPriority;            
-  
+            int Lvl = ParameterManage.tx.RFPriority;
+
+            PACalPara paCalPara = null;
+
+            if (addr == ParameterManage.tx.PA1Addr)
+            {
+                paCalPara = ParameterManage.tx.PA[0];
+            }
+            else if (addr == ParameterManage.tx.PA2Addr)
+            {
+                paCalPara = ParameterManage.tx.PA[1];
+            }
+
             //PowerStatus status = new PowerStatus();
             RFSignal.RFClear(addr, Lvl);
             RFSignal.RFSample2(addr, Lvl);
-            RFSignal.RFPower(addr, Lvl, ParameterManage.tx.power[0]);
-            RFSignal.RFFreq(addr, Lvl, ParameterManage.tx.freq[0]);
+            RFSignal.RFPower(addr, Lvl, paCalPara.power[0]);
+            RFSignal.RFFreq(addr, Lvl, paCalPara.freq[0]);
             RFSignal.RFOpenSource(Lvl);
             RFSignal.RFOn(addr, Lvl);            
             RFSignal.RFStart(addr);
 
-            if (!handlePARev.WaitOne(4000))
+            if (!__handlePARev.WaitOne(4000))
             {
-                PrintInfo2UI(NoACK);
+                PrintListInfo(__NoACK);
                 goto TX_CALIB_ERROR;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
             Thread.Sleep(300);
 
@@ -181,9 +223,9 @@ namespace PimCalibration
             int pwrIdxEnd = 0;
             int pwrIdxDiv = 0;
 
-            for (int i = 0; i < ParameterManage.tx.power.Count; i++)
+            for (int i = 0; i < paCalPara.power.Count; i++)
             {
-                if (ParameterManage.tx.power[i] > ParameterManage.tx.PowerOffsetSwitch)
+                if (paCalPara.power[i] > ParameterManage.tx.PowerOffsetSwitch)
                 {
                     pwrIdxDiv = i;
                     break;
@@ -191,107 +233,118 @@ namespace PimCalibration
             }
 
             pwrIdxStart = (ed == TxCalDataStruct.EPowerDivide.low) ? 0 : pwrIdxDiv;
-            pwrIdxEnd = (ed == TxCalDataStruct.EPowerDivide.low) ? pwrIdxDiv : ParameterManage.tx.power.Count;
-            
-            for (int i = 0; i < ParameterManage.tx.freq.Count; i++)
+            pwrIdxEnd = (ed == TxCalDataStruct.EPowerDivide.low) ? pwrIdxDiv : paCalPara.power.Count;
+
+            for (int i = 0; i < paCalPara.freq.Count; i++)
             {
                 for (int j = pwrIdxStart; j < pwrIdxEnd; j++)
-                {
+                {                                           
                     int cycleCnt = 0;
                     int calibLarge = 2;
-                    float power = ParameterManage.tx.power[j];
+                    float power = paCalPara.power[j];
                     float powerRead = power;
-                    float freq = ParameterManage.tx.freq[i];
-                    bool calibOK = true;
+                    float freq = paCalPara.freq[i];
+                    bool b_calibOK = true;
 
                     RFSignal.RFClear(addr, Lvl);
-                    RFSignal.RFSetAtt(addr, Lvl, (int)(ParameterManage.tx.powerAtt[j]*2));
+                    RFSignal.RFSetAtt(addr, Lvl, (int)(paCalPara.powerAtt[j] * 2));
                     RFSignal.RFStart(addr);
 
-                    if (!handlePARev.WaitOne(2000))
+                    if (!__handlePARev.WaitOne(2000))
                     {
-                        PrintInfo2UI(NoACK);
+                        PrintListInfo(__NoACK);
                         goto TX_CALIB_ERROR;
                     }
-                    handlePARev.Reset();
+                    __handlePARev.Reset();
 
                     do
                     {
+                        if (!this.__bTxCalRun)
+                        {
+                            PrintListInfo("==>捕捉指令，等待退出...");
+                            TxCaliStopDuring(addr, pm);
+                            Thread.CurrentThread.Abort();
+                        }
+
                         if (calibLarge-- > 0)
-                            power = power * 2 - powerRead;
+                        {
+                            if (Math.Abs(powerRead - power) < 7f)//超过该值，系统的故障
+                                power = power * 2 - powerRead;
+                        }
                         else
-                            power += ParameterManage.tx.Step * (ParameterManage.tx.power[j] - powerRead) / Math.Abs(ParameterManage.tx.power[j] - powerRead);
+                            power += ParameterManage.tx.Step * (paCalPara.power[j] - powerRead) / Math.Abs(paCalPara.power[j] - powerRead);
 
                         RFSignal.RFClear(addr, Lvl);
                         RFSignal.RFFreq(addr, Lvl, freq);    
                         RFSignal.RFPower(addr, Lvl, power);                                                                               
                         RFSignal.RFStart(addr);
 
-                        if (!handlePARev.WaitOne(2000))
+                        if (!__handlePARev.WaitOne(4000))
                         {
-                            PrintInfo2UI(NoACK);
+                            PrintListInfo(__NoACK);
                             goto TX_CALIB_ERROR;
                         }
-                        handlePARev.Reset();
+                        __handlePARev.Reset();
 
                         Thread.Sleep(ParameterManage.tx.CalDelay);
 
-                        PrintInfo2UI("==>(PA"+dispNum.ToString()+")Frequency:" +
-                                             ParameterManage.tx.freq[i] +
-                                             "MHz SetPower:" +
-                                             power.ToString() + "dBm Try Calibration Count:" + cycleCnt.ToString());
+                        PrintListInfo("==>[PA"+dispNum.ToString()+"]:"+
+                                            " Freq = " + paCalPara.freq[i].ToString("F0") + " MHz" +
+                                            " SetPower = " + power.ToString("F2") + "dBm Count:" + cycleCnt.ToString());
                         
                         //读取功率计
                         powerRead = pm.Read(freq);
                         if (powerRead == PowerMeter.READ_ERROR)
                         {
-                            PrintInfo2UI("==>Read Power Failed!");
+                            PrintListInfo("==>Read Power Failed!");
                             goto TX_CALIB_ERROR;
                         }                        
 
+                        //补偿耦合器值
                         powerRead += (ed == TxCalDataStruct.EPowerDivide.low) ? ParameterManage.tx.PowerOffsetLow : ParameterManage.tx.PowerOffsetHigh;
 
-                        PrintInfo2UI("==>(PA" + dispNum.ToString() + ")Frequency:" +
-                                             ParameterManage.tx.freq[i] +
-                                             "MHz ReadPower:" +
-                                             powerRead.ToString() + "dBm");
+                        PrintListInfo( "==>[PA" + dispNum.ToString() + "]:" +
+                                              " Freq = " + paCalPara.freq[i].ToString("F0") + " MHz" +
+                                              " ReadPower = " + powerRead.ToString("F2") + " dBm ");
 
                         if (cycleCnt++ > ParameterManage.tx.CycleCnt)
                         {
-                            //PrintInfo2UI("==>Calibrate PA" + dispNum.ToString() + " Failure!");
-                            //goto TX_CALIB_ERROR;
-                            if (addr == ParameterManage.tx.PA1Addr)
-                                ParameterManage.tx.errCollect1.Add(ParameterManage.tx.freq[i], ParameterManage.tx.power[j]);
-                            if (addr == ParameterManage.tx.PA2Addr)
-                                ParameterManage.tx.errCollect2.Add(ParameterManage.tx.freq[i], ParameterManage.tx.power[j]);
+                            b_calibOK = false;                              
+                            power = paCalPara.power[j];
 
-                            power = ParameterManage.tx.power[j];
-                            calibOK = false;
-                            PrintInfo2UI("==>Calibrate PA" + dispNum.ToString() + " Failed!");
+                            if (addr == ParameterManage.tx.PA1Addr)
+                                ParameterManage.tx.errCollect[0, i, j] = true;
+                            else if (addr == ParameterManage.tx.PA2Addr)
+                                ParameterManage.tx.errCollect[1, i, j] = true;  
+                     
                             break;
                         }
 
-                    } while (Math.Abs(ParameterManage.tx.power[j]-powerRead) > ParameterManage.tx.powerFloat[j]);                    
+                    } while (Math.Abs(paCalPara.power[j]-powerRead) > paCalPara.powerFloat[j]);                    
  
                     if (addr == ParameterManage.tx.PA1Addr)
                     {
-                        ParameterManage.tx.powerCalib[0, i, j] = power - ParameterManage.tx.power[j];                        
+                        ParameterManage.tx.powerCalib[0, i, j] = power - paCalPara.power[j];                        
                     }
                     else if (addr == ParameterManage.tx.PA2Addr)
                     {
-                        ParameterManage.tx.powerCalib[1, i, j] = power - ParameterManage.tx.power[j];
+                        ParameterManage.tx.powerCalib[1, i, j] = power - paCalPara.power[j];
                     }
-                    
-                    if(calibOK)
-                        PrintInfo2UI("==>(PA" + dispNum.ToString() + ")Frequency:" +
-                                        ParameterManage.tx.freq[i] +
-                                        "MHz Calibration Success!");
-                    else
-                        PrintInfo2UI("==>(PA" + dispNum.ToString() + ")Frequency:" +
-                                        ParameterManage.tx.freq[i] +
-                                        "MHz Calibration Failed!");
 
-                    PrintInfo2UI("---------------------------------------------------------------");
+                    if (b_calibOK)
+                    {
+                        PrintListInfo("==>[PA" + dispNum.ToString() + "] " +
+                                            "Freq = " + paCalPara.freq[i] + " MHz " +
+                                            "Calibrate Success!");
+                    }
+                    else
+                    {
+                        PrintListInfo("==>[PA" + dispNum.ToString() + "] " +
+                                            "Freq = " + paCalPara.freq[i] + " MHz " +
+                                            "Calibrate Failed!");
+                    }
+
+                    PrintListInfo("---------------------------------------------------------------");
                 }
             }
 
@@ -299,15 +352,15 @@ namespace PimCalibration
             RFSignal.RFOff(addr, Lvl);
             RFSignal.RFStart(addr);
 
-            if (!handlePARev.WaitOne(2000))
+            if (!__handlePARev.WaitOne(2000))
             {
-                PrintInfo2UI(NoACK);
+                PrintListInfo(__NoACK);
                 goto TX_CALIB_ERROR;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
-            PrintInfo2UI("==>Calibrate PA" + dispNum.ToString() + " Success!");
-            PrintInfo2UI("============================================");
+            PrintListInfo("==>Calibrate PA" + dispNum.ToString() + " Success!");
+            PrintListInfo("============================================");
             return true;
 
 TX_CALIB_ERROR:
@@ -316,52 +369,69 @@ TX_CALIB_ERROR:
             RFSignal.RFOff(addr, Lvl);
             RFSignal.RFStart(addr);
 
-            if (!handlePARev.WaitOne(2000))
+            if (!__handlePARev.WaitOne(2000))
             {
-                PrintInfo2UI(NoACK);
+                PrintListInfo(__NoACK);
                 goto TX_CALIB_ERROR;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
-            PrintInfo2UI("==>Calibrate PA" + dispNum.ToString() + " Failed!");
+            PrintListInfo("==>Calibrate PA" + dispNum.ToString() + " Failed!");
             return false;
-        }        
-        /// <summary>
-        /// 
+        }
+        /// <summary>发信采样通道
+        ///发信采样通道 
         /// </summary>
         /// <param name="addr"></param>
         /// <returns></returns>
-        private bool TxSampleChannel(int addr)
+        private bool TxSampleChannel(int addr,PowerMeter pm)
         {
             int Lvl = ParameterManage.tx.RFPriority;
             int dispNum = addr - Math.Min(ParameterManage.tx.PA1Addr, ParameterManage.tx.PA2Addr) + 1;
 
-            PrintInfo2UI("==>Sample...");
+            PrintListInfo("==>Sample...");
+
+            PACalPara paCalPara = null;
+
+            if (addr == ParameterManage.tx.PA1Addr)
+            {
+                paCalPara = ParameterManage.tx.PA[0];
+            }
+            else if (addr == ParameterManage.tx.PA2Addr)
+            {
+                paCalPara = ParameterManage.tx.PA[1];
+            }
 
             RFSignal.RFClear(addr, Lvl);
             RFSignal.RFSample2(addr, Lvl);
             RFSignal.RFOpenSource(Lvl);
             RFSignal.RFOn(addr, Lvl);
-            RFSignal.RFFreq(addr, Lvl, ParameterManage.tx.freq[0]);
-            RFSignal.RFPower(addr, Lvl, ParameterManage.tx.power[0]);
+            RFSignal.RFFreq(addr, Lvl, paCalPara.freq[0]);
+            RFSignal.RFPower(addr, Lvl, paCalPara.power[0]);
             RFSignal.RFSample(addr, Lvl);
             RFSignal.RFStart(addr);
 
-            if (handlePARev.WaitOne(5000) == false)
+            if (__handlePARev.WaitOne(5000) == false)
             {
-                PrintInfo2UI("==>PA NO ACK!");
+                PrintListInfo("==>PA NO ACK!");
                 goto TX_SAMPLE_ERROR;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
             //采样
-            for (int j = 0; j < ParameterManage.tx.power.Count; j++)
-            {                
-                for (int i = 0; i < ParameterManage.tx.freq.Count; i++)
+            for (int j = 0; j < paCalPara.power.Count; j++)
+            {
+                for (int i = 0; i < paCalPara.freq.Count; i++)
                 {
+                    if (!this.__bTxCalRun)
+                    {
+                        TxCaliStopDuring(addr,pm);                        
+                        Thread.CurrentThread.Abort();
+                    }
+
                     PowerStatus status = new PowerStatus();
-                    float power = ParameterManage.tx.power[j];
-                    float freq = ParameterManage.tx.freq[i];                    
+                    float power = paCalPara.power[j];
+                    float freq = paCalPara.freq[i];                    
 
                     if (addr == ParameterManage.tx.PA1Addr)
                     {
@@ -376,15 +446,15 @@ TX_CALIB_ERROR:
                     RFSignal.RFClear(addr, Lvl);
                     RFSignal.RFFreq(addr, Lvl, freq);
                     RFSignal.RFPower(addr, Lvl, power);
-                    RFSignal.RFSetAtt(addr, Lvl, (int)(ParameterManage.tx.powerAtt[j] * 2));                 
+                    RFSignal.RFSetAtt(addr, Lvl, (int)(paCalPara.powerAtt[j] * 2));                 
                     RFSignal.RFStart(addr);
 
-                    if (!handlePARev.WaitOne(5000))
+                    if (!__handlePARev.WaitOne(5000))
                     {
-                        PrintInfo2UI("==>PA NO ACK!");
+                        PrintListInfo("==>PA NO ACK!");
                         goto TX_SAMPLE_ERROR;
                     }
-                    handlePARev.Reset();
+                    __handlePARev.Reset();
 
                     if (i == 0)
                         Thread.Sleep(2000);
@@ -398,24 +468,27 @@ TX_CALIB_ERROR:
                         RFSignal.RFSample(addr, Lvl);
                         RFSignal.RFStart(addr);
 
-                        if (!handlePARev.WaitOne(5000))
+                        if (!__handlePARev.WaitOne(5000))
                         {
-                            PrintInfo2UI("==>PA NO ACK!");
+                            PrintListInfo("==>PA NO ACK!");
                             goto TX_SAMPLE_ERROR;
                         }
-                        handlePARev.Reset();
+                        __handlePARev.Reset();
                     } while (i == 0 && --fstnt>0);
 
                     RFSignal.RFStatus(addr, ref status);
-                    PrintInfo2UI("==>PA" + dispNum.ToString() + " Freq = " + freq.ToString() + "MHz,Power = " + power.ToString("F2") + "dBm.OutP= " + status.Status2.OutP.ToString("F2") + "dBm");
+                    PrintListInfo("==>[PA" + dispNum.ToString() + "] Freq = " + 
+                                        freq.ToString("F0") + " MHz Power = " + 
+                                        power.ToString("F2") + " dBm  OutP = " + 
+                                        status.Status2.OutP.ToString("F2") + " dBm" );
 
                     if (addr == ParameterManage.tx.PA1Addr)
                     {
-                        ParameterManage.tx.powerDisp[0, i, j] = ParameterManage.tx.power[j] - status.Status2.OutP;
+                        ParameterManage.tx.powerDisp[0, i, j] = paCalPara.power[j] - status.Status2.OutP;
                     }
                     else if (addr == ParameterManage.tx.PA2Addr)
                     {
-                        ParameterManage.tx.powerDisp[1, i, j] = ParameterManage.tx.power[j] - status.Status2.OutP;
+                        ParameterManage.tx.powerDisp[1, i, j] = paCalPara.power[j] - status.Status2.OutP;
                     }
                 }
             }
@@ -424,12 +497,12 @@ TX_CALIB_ERROR:
             RFSignal.RFOff(addr, Lvl);
             RFSignal.RFStart(addr);
 
-            if (!handlePARev.WaitOne(2000))
+            if (!__handlePARev.WaitOne(2000))
             {
-                PrintInfo2UI("==>PA NO ACK!");
+                PrintListInfo("==>PA NO ACK!");
                 goto TX_SAMPLE_ERROR;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
             return true;
         TX_SAMPLE_ERROR:
@@ -438,22 +511,22 @@ TX_CALIB_ERROR:
             RFSignal.RFOff(addr, Lvl);
             RFSignal.RFStart(addr);
 
-            if (!handlePARev.WaitOne(2000))
+            if (!__handlePARev.WaitOne(2000))
             {
-                PrintInfo2UI("==>PA NO ACK!");
+                PrintListInfo("==>PA NO ACK!");
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
             return false;
         }
-        /// <summary>
+        /// <summary>功放功率校准工作线程
         /// 功放功率校准工作线程
         /// </summary>
         /// <param name="o"></param>
         private void TxCalibRun(object o)
         {
-            PrintInfo2UI("=========================================");
-            PrintInfo2UI("==>Start Tx Calibration...");
+            PrintListInfo("=========================================");
+            PrintListInfo("==>Start Tx Calibration...");
 
             //设置功率计
             PowerMeter pm = new PowerMeter(ParameterManage.tx.InsCom, 9600);
@@ -463,31 +536,43 @@ TX_CALIB_ERROR:
             RFSignal.InitRFSignal((IntPtr)o);
 
             //清空错误字典
-            ParameterManage.tx.errCollect1.Clear();
+            //ParameterManage.tx.errCollect1.Clear();
+            for (int i = 0; i < ParameterManage.tx.PA.Length; i++)
+            {
+                for (int j = 0; j < ParameterManage.tx.PA[i].freq.Count; j++)
+                {
+                    for (int k = 0; k < ParameterManage.tx.PA[i].power.Count; k++)
+                    {
+                        ParameterManage.tx.errCollect[i, j, k] = false;
+                    }
+                }
+            }
 
             if (RFSignal.NewRFSignal(ParameterManage.tx.PA1Addr, RFSignal.clsSunWave, ParameterManage.tx.PAformule) == false)
             {
-                PrintInfo2UI("==>PA1 Initalization  Failed!");
+                PrintListInfo("==>PA1 Initalization  Failed!");
                 goto GOTO_TXCAL_FAILED;
             }
 
-            handlePARev.WaitOne(2000);
-            handlePARev.Reset();
+            __handlePARev.WaitOne(2000);
+            __handlePARev.Reset();
 
             if (RFSignal.NewRFSignal(ParameterManage.tx.PA2Addr, RFSignal.clsSunWave, ParameterManage.tx.PAformule) == false)
             {
-                PrintInfo2UI("==>PA2 Initalization  Failed!");
+                PrintListInfo("==>PA2 Initalization  Failed!");
                 goto GOTO_TXCAL_FAILED; 
             }
 
-            handlePARev.WaitOne(1000);
-            handlePARev.Reset();
+            __handlePARev.WaitOne(1000);
+            __handlePARev.Reset();
 
             Thread.Sleep(1000);
+
             if (ParameterManage.tx.SampleOnly) goto GOTO_ONLY_SAMPLE;
 
             bool result;
 
+            //耦合参数一校准
             result = TxCalibChannel(ParameterManage.tx.PA1Addr,pm ,TxCalDataStruct.EPowerDivide.low);
             if (result == false) goto GOTO_TXCAL_FAILED;
 
@@ -497,10 +582,11 @@ TX_CALIB_ERROR:
             //弹框要求更换耦合器
             if (DialogResult.OK != MessageBox.Show("Please Switch the Coupler!", "", MessageBoxButtons.OKCancel))
             {
-                PrintInfo2UI("==>Tx Calibration Over!");
+                PrintListInfo("==>Tx Calibration Over!");
                 goto GOTO_TXCAL_FAILED;
-            }             
+            }
 
+            //耦合参数二校准
             result = TxCalibChannel(ParameterManage.tx.PA1Addr, pm, TxCalDataStruct.EPowerDivide.high);
             if (result == false) goto GOTO_TXCAL_FAILED;
 
@@ -508,35 +594,41 @@ TX_CALIB_ERROR:
             if (result == false) goto GOTO_TXCAL_FAILED;
 
         GOTO_ONLY_SAMPLE:
-            result = TxSampleChannel(ParameterManage.tx.PA1Addr);
+            result = TxSampleChannel(ParameterManage.tx.PA1Addr,pm);
             if (result == false) goto GOTO_TXCAL_FAILED;
 
-            result = TxSampleChannel(ParameterManage.tx.PA2Addr);
+            result = TxSampleChannel(ParameterManage.tx.PA2Addr,pm);
             if (result == false) goto GOTO_TXCAL_FAILED;
-
-            //if (DialogResult.OK == MessageBox.Show("Save The Calibration Data!", "", MessageBoxButtons.OKCancel))
-            //{
-            //    ParameterManage.SaveTxChannelPara(Application.StartupPath);
-            //}
 
             ReportForm rf = new ReportForm();
 
             if (DialogResult.OK == rf.ShowDialog())
             {
                 ParameterManage.SaveTxChannelPara(Application.StartupPath);
-
-                if (ParameterManage.tx.errCollect1.Count > 0 || ParameterManage.tx.errCollect2.Count >0)
+                bool contFlag = true;
+                for (int i = 0; i < ParameterManage.tx.PA.Length && contFlag; i++)
                 {
-                    ParameterManage.SaveTxFailedData(Application.StartupPath);
+                    for (int j = 0; j < ParameterManage.tx.PA[i].freq.Count && contFlag; j++)
+                    {
+                        for (int k = 0; k < ParameterManage.tx.PA[i].power.Count && contFlag; k++)
+                        {
+                            if (ParameterManage.tx.errCollect[i, j, k])
+                            {
+                                ParameterManage.SaveTxFailedData(Application.StartupPath);
+                                contFlag = false;
+                            }
+                        }
+                    }
                 }
-            }
+            } 
 
             RFSignal.RFFinalize();
             pm.Dispose();
 
-            PrintInfo2UI("==>Calibration is Finished!");
-            PrintInfo2UI("OVER");
+            PrintListInfo("==>Calibration is Finished!");
+            PrintListInfo("OVER");
             ButtonSwitch(ButtonSwitchStatus.Calibrated);
+            this.__bTxCalRun = false;
             return;
 
 GOTO_TXCAL_FAILED:
@@ -544,18 +636,23 @@ GOTO_TXCAL_FAILED:
             RFSignal.RFFinalize();
             pm.Dispose();
 
-            PrintInfo2UI("==>TX Calibration Failed!");
-            PrintInfo2UI("==>Abort!");
-            PrintInfo2UI("OVER");
+            PrintListInfo("==>TX Calibration Failed!");
+            PrintListInfo("==>Abort!");
+            PrintListInfo("OVER");
             ButtonSwitch(ButtonSwitchStatus.Calibrated);
+            this.__bTxCalRun = false;
         }
+        #endregion
+
+        #region 发信测试
+
         /// <summary>
-        /// 
+        /// 测试校准
         /// </summary>
         /// <param name="o"></param>
         private void TxCalibTestRun(object o)
         {
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
             PowerMeter pm = null;
             int comNum = ParameterManage.tx.PA1Addr;
@@ -563,47 +660,47 @@ GOTO_TXCAL_FAILED:
             float p = float.Parse(tbPower.Text);
             float f = float.Parse(tbfreq.Text);
 
-            PrintInfo2UI("=========================================");
+            PrintListInfo("=========================================");
 
             if (ParameterManage.tx.SampleOnly)
-                PrintInfo2UI("==>Enter Sample Mode...");
+                PrintListInfo("==>Enter Sample Mode...");
             else
-                PrintInfo2UI("==>Start Test...");
+                PrintListInfo("==>Start Test...");
 
             try
             {
                 pm = new PowerMeter(ParameterManage.tx.InsCom, 9600);
                 pm.Preset();
-                PrintInfo2UI("==>TEST Power Meter Preset!");
+                PrintListInfo("==>TEST Power Meter Preset!");
             }
             catch (Exception ex)
             {
-                PrintInfo2UI("==>Open COM Failed! ErrorInfo = "+ex.ToString());
+                PrintListInfo("==>Open COM Failed! ErrorInfo = "+ex.ToString());
                 goto TX_CALIB_TEST_OVER;
             }
 
-            PrintInfo2UI("==>Open COM Success!");
+            PrintListInfo("==>Open COM Success!");
 
             RFSignal.InitRFSignal((IntPtr)o);           
 
             //if (RFSignal.NewRFSignal(comNum, RFSignal.clsSunWave, RFSignal.formuleLinar) == false)
             if (RFSignal.NewRFSignal(comNum, RFSignal.clsSunWave, ParameterManage.tx.PAformule) == false)
             {
-                PrintInfo2UI("==>PA1 Initalization  Failed!");
+                PrintListInfo("==>PA1 Initalization  Failed!");
                 goto TX_CALIB_TEST_OVER;
             }
 
-            handlePARev.WaitOne(2000);
-            handlePARev.Reset();
+            __handlePARev.WaitOne(2000);
+            __handlePARev.Reset();
 
-            PrintInfo2UI("==>PA1 Initalization  Success!");
+            PrintListInfo("==>PA1 Initalization  Success!");
 
-            float pwrAtt = ParameterManage.tx.powerAtt[0];
-            for (int i = 1; i < ParameterManage.tx.power.Count; i++)
+            float pwrAtt = ParameterManage.tx.PA[0].powerAtt[0];
+            for (int i = 1; i < ParameterManage.tx.PA[0].power.Count; i++)
             {
-                if (p >= ParameterManage.tx.power[i])
+                if (p >= ParameterManage.tx.PA[0].power[i])
                 {
-                    pwrAtt = ParameterManage.tx.powerAtt[i];
+                    pwrAtt = ParameterManage.tx.PA[0].powerAtt[i];
                     break;
                 }
             }
@@ -618,31 +715,31 @@ GOTO_TXCAL_FAILED:
             RFSignal.RFSetAtt(comNum, Lvl, (int)(pwrAtt * 2));
             RFSignal.RFStart(comNum);
 
-            if (handlePARev.WaitOne(5000) == false)
+            if (__handlePARev.WaitOne(5000) == false)
             {
-                PrintInfo2UI("==>PA1 Open Failed!");
+                PrintListInfo("==>PA1 Open Failed!");
                 goto TX_CALIB_TEST_OVER;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
-            PrintInfo2UI("==>PA1 Set Output Power = " + p.ToString() + "dBm");
+            PrintListInfo("==>PA1 Set Output Power = " + p.ToString() + "dBm");
 
             Thread.Sleep(ParameterManage.tx.SampleDelay);  
 
-            PrintInfo2UI("==>PA1 Sample...");
+            PrintListInfo("==>PA1 Sample...");
             RFSignal.RFClear(comNum, Lvl);
             RFSignal.RFSample(comNum, Lvl);
             RFSignal.RFStart(comNum);
 
-            if (handlePARev.WaitOne(5000) == false)
+            if (__handlePARev.WaitOne(5000) == false)
             {
-                PrintInfo2UI("==>PA1 Read Failed!");
+                PrintListInfo("==>PA1 Read Failed!");
                 goto TX_CALIB_TEST_OVER;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
             RFSignal.RFStatus(comNum, ref status);                      
-            PrintInfo2UI("==>Read Sample PA1 Out Power = " + status.Status2.OutP.ToString("F2") + "dBm");
+            PrintListInfo("==>Read Sample PA1 Out Power = " + status.Status2.OutP.ToString("F2") + "dBm");
             //PrintInfo2UI("==>Get PA Current = " + status.Status1.CurrMax.ToString("F2") + "A");
             //PrintInfo2UI("==>Get PA Addr = " + status.Status1.Adrr.ToString() + "");
             //PrintInfo2UI("==>Get PA Switch = " + status.Status2.RFOn.ToString() + "");
@@ -654,34 +751,34 @@ GOTO_TXCAL_FAILED:
 
             if (power == PowerMeter.READ_ERROR && ParameterManage.tx.SampleOnly == false)
             {
-                PrintInfo2UI("==>Read Instrument Failed!");
+                PrintListInfo("==>Read Instrument Failed!");
                 goto TX_CALIB_TEST_OVER;
             }
 
             power += (p <= ParameterManage.tx.PowerOffsetSwitch)? ParameterManage.tx.PowerOffsetLow:ParameterManage.tx.PowerOffsetHigh;
 
-            PrintInfo2UI("==>TEST Power Meter Read Power = " + power.ToString() + " dBm"); 
+            PrintListInfo("==>TEST Power Meter Read Power = " + power.ToString() + " dBm"); 
          
             RFSignal.RFClear(comNum, Lvl);
             RFSignal.RFOff(comNum, Lvl);
             RFSignal.RFStart(comNum);
 
-            if (handlePARev.WaitOne(1000) == false)
+            if (__handlePARev.WaitOne(1000) == false)
             {
-                PrintInfo2UI("==>PA1 Close Failed!");
+                PrintListInfo("==>PA1 Close Failed!");
                 goto TX_CALIB_TEST_OVER;
             }
-            handlePARev.Reset();
+            __handlePARev.Reset();
 
-            this.txStartValid = true;
+            this.__txStartValid = true;
             this.btnTxStart.Enabled = true;
 
-            PrintInfo2UI("==>TX Test Over!");
+            PrintListInfo("==>TX Test Over!");
             RFSignal.RFFinalize();
             if (pm != null)
                 pm.Dispose();
             ButtonSwitch(ButtonSwitchStatus.CheckPass);
-            PrintInfo2UI("OVER");
+            PrintListInfo("OVER");
             return;
 
 TX_CALIB_TEST_OVER:
@@ -690,19 +787,22 @@ TX_CALIB_TEST_OVER:
             RFSignal.RFOff(comNum, Lvl);
             RFSignal.RFStart(comNum);
 
-            handlePARev.WaitOne(1000);
-            handlePARev.Reset();
+            __handlePARev.WaitOne(1000);
+            __handlePARev.Reset();
 
-            PrintInfo2UI("==>TX Test Over!");
+            PrintListInfo("==>TX Test Over!");
             RFSignal.RFFinalize();
             if ( pm!= null )
                 pm.Dispose();
             ButtonSwitch(ButtonSwitchStatus.CheckFailed);
-            PrintInfo2UI("OVER");
+            PrintListInfo("OVER");
         }
+
         #endregion
 
-        #region 频谱仪校准 
+        #endregion
+
+        #region 频谱仪校准
         /// <summary>
         /// 频谱仪通路Rx校准
         /// </summary>
@@ -716,11 +816,11 @@ TX_CALIB_TEST_OVER:
             int gpioValue;
             bool isSpecStart = false;
 
-            PrintInfo2UI("=========================================");
-            PrintInfo2UI("==>Start Rx Calibraion...");
+            PrintListInfo("=========================================");
+            PrintListInfo("==>Start Rx Calibraion...");
 
-            handleSpecNormal.Reset();
-            handleSpecError.Reset();
+            __handleSpecNormal.Reset();
+            __handleSpecError.Reset();
 
             ////将连接操作放入频谱仪检测当中（频谱仪操作前必须进行连接）
             //try
@@ -737,15 +837,15 @@ TX_CALIB_TEST_OVER:
 
             sigGen.Preset();           
             Thread.Sleep(2000);
-            PrintInfo2UI("==>SignalGenerator has preseted.");
+            PrintListInfo("==>SignalGenerator has preseted.");
             sigGen.WriteFreq(1e9f);
             sigGen.WritePower(-80f);
             sigGen.Open();         
 
             for (int i = ParameterManage.rx.startIdx; i < ParameterManage.rx.channel.Length; i++)
             {
-                PrintInfo2UI("===================================================");
-                handleSpecNormal.Reset();
+                PrintListInfo("===================================================");
+                __handleSpecNormal.Reset();
                 //PIM
                 if (i == ParameterManage.INDEX_PIM)
                 {
@@ -756,7 +856,7 @@ TX_CALIB_TEST_OVER:
 
                     gpioValue = Gpio.GPIO_Get(gpioHandle, 4);
                     Gpio.GPIO_Set(gpioHandle, 4, 1);
-                    PrintInfo2UI("==>Switch PIM Channel...");
+                    PrintListInfo("==>Switch PIM Channel...");
                 }
                 //窄带
                 if (i == ParameterManage.INDEX_NARROW)
@@ -768,7 +868,7 @@ TX_CALIB_TEST_OVER:
 
                     gpioValue = Gpio.GPIO_Get(gpioHandle, 4);
                     Gpio.GPIO_Set(gpioHandle, 4, 1);
-                    PrintInfo2UI("==>Switch Narrow Channel...");
+                    PrintListInfo("==>Switch Narrow Channel...");
                 }
                 //宽带
                 if (i == ParameterManage.INDEX_BROAD)
@@ -780,7 +880,7 @@ TX_CALIB_TEST_OVER:
 
                     gpioValue = Gpio.GPIO_Get(gpioHandle, 4);
                     Gpio.GPIO_Set(gpioHandle, 4, 0);
-                    PrintInfo2UI("==>Switch Broad Channel...");
+                    PrintListInfo("==>Switch Broad Channel...");
                 }
 
                 RxCalDataStruct.bandChannel chanRx = ParameterManage.rx.channel[i];
@@ -795,21 +895,31 @@ TX_CALIB_TEST_OVER:
 
                 isSpecStart = true;
 
-                PrintInfo2UI("==>Configurate the Spectrum...");
+                PrintListInfo("==>Configurate the Spectrum...");
 
                 Thread.Sleep(1000);//需延时
 
                 for (int j = 0; j < chanRx.rbw.Count; j++)
                 {
-                    PrintInfo2UI("--------------------------------------------------------------------------");
+                    PrintListInfo("--------------------------------------------------------------------------");
                     int rbw = chanRx.rbw[j]*1000;
                     
                     for (int k = 0; k < chanRx.freq.Count; k++)
                     {
-                        PrintInfo2UI("+++++++++++++++++++++++++++++++++++++++++++++++++++");
+                        if (!this.__bRxCalRun)
+                        {
+                            __specObj.StopAnalysis();
+                            __specObj.Dispose();
+                            Gpio.GPIO_Close(gpioHandle);
+                            sigGen.Close();                           
+                            this.Invoke(new MethodInvoker(delegate { this.Close(); }));
+                            Thread.CurrentThread.Abort();
+                        }
+
+                        PrintListInfo("+++++++++++++++++++++++++++++++++++++++++++++++++++");
                         float freq = chanRx.freq[k];
                         float power = chanRx.power[k];
-                        PrintInfo2UI("==>Set SignalGenerator Power = " + power.ToString() + " dBm / freq = " + freq.ToString() + " MHz");
+                        PrintListInfo("==>Set SignalGenerator Power = " + power.ToString() + " dBm / freq = " + freq.ToString() + " MHz");
 
                         //宽带
                         __specObj.StopAnalysis();
@@ -841,12 +951,12 @@ TX_CALIB_TEST_OVER:
                         //}
                         //PrintInfo2UI("==>(Frequence)" + freq.ToString() + " Read SignalGenerator freq = " + sigGen.ReadFreq().ToString());
 
-                        PrintInfo2UI("==>Set Sepctrum RBW = " + (rbw/1000).ToString() + " KHz");
+                        PrintListInfo("==>Set Sepctrum RBW = " + (rbw/1000).ToString() + " KHz");
                         __specObj.SetRBW(rbw);
 
-                        if (handleSpecError.WaitOne(1000) == true)
+                        if (__handleSpecError.WaitOne(1000) == true)
                         {
-                            PrintInfo2UI("==>Spectrum has errors!");
+                            PrintListInfo("==>Spectrum has errors!");
                             goto GOTO_SPEC_OVER;
                         }                        
 
@@ -855,12 +965,12 @@ TX_CALIB_TEST_OVER:
                         float dbm = 0;
                         do
                         {
-                            if (handleSpecNormal.WaitOne(5000) == false)
+                            if (__handleSpecNormal.WaitOne(5000) == false)
                             {
-                                PrintInfo2UI("==>Spectrum without response!");
+                                PrintListInfo("==>Spectrum without response!");
                                 goto GOTO_SPEC_OVER;
                             }
-                            handleSpecNormal.Reset();
+                            __handleSpecNormal.Reset();
 
                             dbm = __specObj.FindMaxValue();
                                  
@@ -878,12 +988,12 @@ TX_CALIB_TEST_OVER:
                                                                         chanRx.span[0]);
 
                             Thread.Sleep(1000);
-                            if (handleSpecNormal.WaitOne(5000) == false)
+                            if (__handleSpecNormal.WaitOne(5000) == false)
                             {
-                                PrintInfo2UI("==>Spectrum without response!");
+                                PrintListInfo("==>Spectrum without response!");
                                 goto GOTO_SPEC_OVER;
                             }
-                            handleSpecNormal.Reset();
+                            __handleSpecNormal.Reset();
 
                             dbm = __specObj.FindMaxValue();
                         }
@@ -891,7 +1001,7 @@ TX_CALIB_TEST_OVER:
                         //读取频谱仪测到的功率值
 
                         chanRx.powerCal[j, k] = power - dbm;
-                        PrintInfo2UI("==>Read from Sepctrum is Power = " + dbm.ToString() + " dBm");                       
+                        PrintListInfo("==>Read from Sepctrum is Power = " + dbm.ToString() + " dBm");                       
                     }
                 }
 
@@ -906,8 +1016,8 @@ TX_CALIB_TEST_OVER:
             if( DialogResult.OK ==  MessageBox.Show("Save the calibration data","",MessageBoxButtons.OKCancel))
                 ParameterManage.SaveRxChannelPara(Application.StartupPath);
 
-            PrintInfo2UI("==>Calibrate Rx Success!");
-            PrintInfo2UI("OVER");
+            PrintListInfo("==>Calibrate Rx Success!");
+            PrintListInfo("OVER");
             return;
 
         GOTO_SPEC_OVER:
@@ -918,8 +1028,8 @@ TX_CALIB_TEST_OVER:
             sigGen.Dispose();
             ButtonSwitch(ButtonSwitchStatus.Calibrated);
 
-            PrintInfo2UI("==>Calibrate Rx Failed!");
-            PrintInfo2UI("OVER");
+            PrintListInfo("==>Calibrate Rx Failed!");
+            PrintListInfo("OVER");
         }
         /// <summary>
         /// 检测接收通道
@@ -933,10 +1043,10 @@ TX_CALIB_TEST_OVER:
             bool isSpecStart = false;
             SignalGenerator sgObj = null;
 
-            PrintInfo2UI("=========================================");
-            PrintInfo2UI("==>TEST:Start...");
+            PrintListInfo("=========================================");
+            PrintListInfo("==>TEST:Start...");
 
-            handleSpecNormal.Reset();
+            __handleSpecNormal.Reset();
 
             try
             {
@@ -944,17 +1054,17 @@ TX_CALIB_TEST_OVER:
             }
             catch (Exception ex)
             {
-                PrintInfo2UI("==>TEST:Open COM Interface Failed! Error = " + ex.ToString());
+                PrintListInfo("==>TEST:Open COM Interface Failed! Error = " + ex.ToString());
                 goto GOTO_RX_CHECK_FAILED;
             }
 
             sgObj.Preset();
             Thread.Sleep(1500);
-            PrintInfo2UI("==>TEST:SignalGenerator Preset!");
+            PrintListInfo("==>TEST:SignalGenerator Preset!");
             sgObj.WriteFreq(f);
             sgObj.WritePower(p);
             sgObj.Open();
-            PrintInfo2UI("==>TEST:SignalGenerator Open!");
+            PrintListInfo("==>TEST:SignalGenerator Open!");
          
             if (this.rbPim.Checked)
             {
@@ -971,7 +1081,7 @@ TX_CALIB_TEST_OVER:
 
             try
             {
-                PrintInfo2UI("==>TEST:Spectrum Connecting...");
+                PrintListInfo("==>TEST:Spectrum Connecting...");
                 if (__specObj == null)
                 {//只初始化连接一次，因为频谱仪库函数使用长连接方式
                     __specObj = new Spectrum(0, (IntPtr)o);
@@ -980,11 +1090,11 @@ TX_CALIB_TEST_OVER:
             }
             catch (Exception ex)
             {
-                PrintInfo2UI("==>TEST:Connect Spectrum Failed! ErrorInfo = " + ex.ToString());
+                PrintListInfo("==>TEST:Connect Spectrum Failed! ErrorInfo = " + ex.ToString());
                 goto GOTO_RX_CHECK_FAILED;
             }
 
-            PrintInfo2UI("==>TEST:Spectrum Connected!");
+            PrintListInfo("==>TEST:Spectrum Connected!");
 
             try
             {
@@ -1000,20 +1110,20 @@ TX_CALIB_TEST_OVER:
             }
             catch (Exception ex)
             {
-                PrintInfo2UI("==>TEST:Spectrum Start Failed! Error = " + ex.ToString());
+                PrintListInfo("==>TEST:Spectrum Start Failed! Error = " + ex.ToString());
                 goto GOTO_RX_CHECK_FAILED;
             }
 
-            if (handleSpecNormal.WaitOne(5000) == false)
+            if (__handleSpecNormal.WaitOne(5000) == false)
             {
-                PrintInfo2UI("==>TEST:Fetch Sepctrum Data Failed!");
+                PrintListInfo("==>TEST:Fetch Sepctrum Data Failed!");
                 goto GOTO_RX_CHECK_FAILED;
             }
-            handleSpecNormal.Reset();
+            __handleSpecNormal.Reset();
 
             float rdValue = __specObj.FindMaxValue();
 
-            PrintInfo2UI("==>TEST:Spectrum Read Value = " + rdValue.ToString() + " dBm");
+            PrintListInfo("==>TEST:Spectrum Read Value = " + rdValue.ToString() + " dBm");
 
             if (Math.Abs(rdValue - p) > 30f)
             {
@@ -1021,13 +1131,13 @@ TX_CALIB_TEST_OVER:
                 goto GOTO_RX_CHECK_FAILED;
             }
 
-            PrintInfo2UI("==>TEST:Close SignalGenerator & Spectrum!");                       
+            PrintListInfo("==>TEST:Close SignalGenerator & Spectrum!");                       
             __specObj.StopAnalysis();
             sgObj.Dispose();
             Gpio.GPIO_Close(gpioHandle);
             ButtonSwitch(ButtonSwitchStatus.CheckPass);
-            PrintInfo2UI("==>TEST:RX Check Success!");
-            PrintInfo2UI("OVER");
+            PrintListInfo("==>TEST:RX Check Success!");
+            PrintListInfo("OVER");
             return;
 
 GOTO_RX_CHECK_FAILED:
@@ -1036,8 +1146,8 @@ GOTO_RX_CHECK_FAILED:
                 __specObj.StopAnalysis();
             Gpio.GPIO_Close(gpioHandle);
             ButtonSwitch(ButtonSwitchStatus.CheckFailed);
-            PrintInfo2UI("==>TEST:RX Check Failed!");
-            PrintInfo2UI("OVER");
+            PrintListInfo("==>TEST:RX Check Failed!");
+            PrintListInfo("OVER");
         }
         #endregion
 
@@ -1047,7 +1157,7 @@ GOTO_RX_CHECK_FAILED:
         /// 更新UI
         /// </summary>
         /// <param name="str"></param>
-        private void PrintInfo2UI(string str)
+        private void PrintListInfo(string str)
         {
             //Action<string> abc;
             //abc = delegate(string s)
@@ -1070,7 +1180,7 @@ GOTO_RX_CHECK_FAILED:
                 if (str == "OVER")
                 {
                     this.toolStripStatusLabel1.Text = string.Empty;
-                    this.timeCnt = 0;
+                    this.__timeCnt = 0;
                     this.timer1.Enabled = false;
                     return;
                 }
@@ -1078,11 +1188,12 @@ GOTO_RX_CHECK_FAILED:
                 this.toolStripStatusLabel1.Text = "Running...";
                 this.listBox1.Items.Add(str);
                 this.listBox1.SelectedIndex = listBox1.Items.Count - 1;
+
             }));
         }
 
         private void btnCheck_Click(object sender, EventArgs e)
-        {
+        {            
             if (this.cbbCom.Text == string.Empty)
             {
                 MessageBox.Show("Please Select the COM!");
@@ -1108,23 +1219,24 @@ GOTO_RX_CHECK_FAILED:
 
             this.timer1.Enabled = true;
 
-            ButtonSwitch(ButtonSwitchStatus.Checking);
+            ButtonSwitch(ButtonSwitchStatus.Checking);            
         }
 
         private void btnTxStart_Click(object sender, EventArgs e)
         {
             if (rbTX.Checked)
             {
+                this.__bTxCalRun = true;
                 Thread trd = new Thread(TxCalibRun);
                 trd.Start(this.Handle as object);
                 //ThreadPool.QueueUserWorkItem(new WaitCallback(TxCalibRun), this.Handle as object);
             }
-            else
-                if (rbRX.Checked)
-                {
-                    Thread trd = new Thread(RxCalibRun);
-                    trd.Start(this.Handle as object);
-                }
+            else  if (rbRX.Checked)
+            {
+                this.__bRxCalRun = true;
+                Thread trd = new Thread(RxCalibRun);
+                trd.Start(this.Handle as object);
+            }
 
             this.timer1.Enabled = true;
 
@@ -1220,16 +1332,16 @@ GOTO_RX_CHECK_FAILED:
                 this.rbBroad.Visible = false;
                 this.tbDisplay.Text = ParameterManage.txInfo;
                 this.listBox1.Items.Clear();
-                this.tbPower.Text = ParameterManage.tx.power[0].ToString();
-                this.tbfreq.Text = ParameterManage.tx.freq[0].ToString();
+                this.tbPower.Text = ParameterManage.tx.PA[0].power[0].ToString();
+                this.tbfreq.Text = ParameterManage.tx.PA[0].freq[0].ToString();
                 ButtonSwitch(ButtonSwitchStatus.Ready);
             }
         }
 
         private void timer1_Tick(object sender, EventArgs e)
         {
-            this.timeCnt++;
-            this.toolStripStatusLabel2.Text = (this.timeCnt / 60).ToString("D2") + ":" + (this.timeCnt % 60).ToString("D2");
+            this.__timeCnt++;
+            this.toolStripStatusLabel2.Text = (this.__timeCnt / 60).ToString("D2") + ":" + (this.__timeCnt % 60).ToString("D2");
         }
 
         private void fileToolStripMenuItem_Click(object sender, EventArgs e)
@@ -1245,12 +1357,14 @@ GOTO_RX_CHECK_FAILED:
         private void listBox1_DrawItem(object sender, DrawItemEventArgs e)
         {
             //this.listBox1.DrawMode = DrawMode.OwnerDrawFixed;  使用自绘需要在初始化时设置该模式
+            if (e.Index < 0)return;
+
             string s = this.listBox1.Items[e.Index].ToString();
             //Font fontTemp = this.Font.Clone() as Font;
 
             Font fontTemp = this.listBox1.Font as Font;
 
-            if (s.Contains("Failed") || s.Contains(NoACK))
+            if (s.Contains("Failed") || s.Contains(__NoACK))
             {
                 e.Graphics.FillRectangle(new SolidBrush(Color.Black), e.Bounds);
                 e.Graphics.DrawString(s, this.Font, Brushes.Red, e.Bounds);
@@ -1268,7 +1382,29 @@ GOTO_RX_CHECK_FAILED:
             }
         }
 
-        #endregion
+        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if(DialogResult.OK !=  MessageBox.Show(this,"确定退出",null,MessageBoxButtons.OKCancel,MessageBoxIcon.Question))return;
 
+            ToolStripMenuItem msmi = sender as ToolStripMenuItem;
+            msmi.Enabled = false;
+
+            if (__specObj != null)
+            {
+                __specObj = null;
+            }
+
+            if (!this.__bTxCalRun && !this.__bRxCalRun)
+            {
+                this.Close();
+            }
+
+            lock (this.__threadLock)
+            {
+                this.__bTxCalRun = false;
+                this.__bRxCalRun = false;
+            }
+        }
+        #endregion
     }
 }

@@ -33,7 +33,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>20140102044434157_easyicon_net_128.ico</ApplicationIcon>
+    <ApplicationIcon>Resource\pic.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="SpectrumLib, Version=1.1.2.2027, Culture=neutral, processorArchitecture=MSIL">
@@ -49,18 +49,18 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="AboutBox1.cs">
+    <Compile Include="Form\AboutBox1.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="AboutBox1.Designer.cs">
+    <Compile Include="Form\AboutBox1.Designer.cs">
       <DependentUpon>AboutBox1.cs</DependentUpon>
     </Compile>
     <Compile Include="Driver\Gpio.cs" />
     <Compile Include="Driver\IniFile.cs" />
-    <Compile Include="MainForm.cs">
+    <Compile Include="Form\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="MainForm.Designer.cs">
+    <Compile Include="Form\MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
     <Compile Include="Driver\MessageID.cs" />
@@ -72,16 +72,16 @@
     <Compile Include="Driver\SignalGenerator.cs" />
     <Compile Include="Driver\Spectrum.cs" />
     <Compile Include="CalDataStruct.cs" />
-    <Compile Include="ReportForm.cs">
+    <Compile Include="Form\ReportForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="ReportForm.Designer.cs">
+    <Compile Include="Form\ReportForm.Designer.cs">
       <DependentUpon>ReportForm.cs</DependentUpon>
     </Compile>
-    <EmbeddedResource Include="AboutBox1.resx">
+    <EmbeddedResource Include="Form\AboutBox1.resx">
       <DependentUpon>AboutBox1.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="MainForm.resx">
+    <EmbeddedResource Include="Form\MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
@@ -93,7 +93,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <EmbeddedResource Include="ReportForm.resx">
+    <EmbeddedResource Include="Form\ReportForm.resx">
       <DependentUpon>ReportForm.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="Properties\Settings.settings">
@@ -107,7 +107,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="20140102044434157_easyicon_net_128.ico" />
+    <Content Include="Resource\pic.ico" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

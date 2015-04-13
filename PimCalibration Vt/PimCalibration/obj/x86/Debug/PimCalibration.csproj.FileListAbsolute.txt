@@ -18,14 +18,12 @@ D:\Work\公司资料\仪表校准\PimCalibration\PimCalibration\obj\x86\Debug\Ge
 D:\Work\公司资料\仪表校准\PimCalibration\PimCalibration\obj\x86\Debug\PimCalibration.exe
 D:\Work\公司资料\仪表校准\PimCalibration\PimCalibration\obj\x86\Debug\PimCalibration.pdb
 D:\Work\公司资料\仪表校准\PimCalibration\PimCalibration\obj\x86\Debug\PimCalibration.ReportForm.resources
-D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.exe
-D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.pdb
 D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\bin\Debug\PimCalibration.exe
 D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\bin\Debug\PimCalibration.pdb
-D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\ResolveAssemblyReference.cache
 D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.AboutBox1.resources
 D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.MainForm.resources
 D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.Properties.Resources.resources
 D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.ReportForm.resources
-D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\GenerateResource-ResGen.read.1.tlog
-D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\GenerateResource-ResGen.write.1.tlog
+D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.csproj.GenerateResource.Cache
+D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.exe
+D:\Work\公司资料\仪表校准\PimCalibration Vt\PimCalibration\obj\x86\Debug\PimCalibration.pdb

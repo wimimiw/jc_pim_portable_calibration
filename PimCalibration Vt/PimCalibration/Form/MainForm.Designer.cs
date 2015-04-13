@@ -37,6 +37,7 @@
             this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.modifyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItem1 = new System.Windows.Forms.ToolStripMenuItem();
+            this.exitToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.label1 = new System.Windows.Forms.Label();
             this.cbbCom = new System.Windows.Forms.ComboBox();
             this.label2 = new System.Windows.Forms.Label();
@@ -78,6 +79,7 @@
             // 
             // statusStrip1
             // 
+            this.statusStrip1.ImageScalingSize = new System.Drawing.Size(16, 12);
             this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.toolStripStatusLabel1,
             this.toolStripStatusLabel2});
@@ -107,7 +109,8 @@
             this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.fileToolStripMenuItem,
             this.modifyToolStripMenuItem,
-            this.toolStripMenuItem1});
+            this.toolStripMenuItem1,
+            this.exitToolStripMenuItem});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
             this.menuStrip1.Padding = new System.Windows.Forms.Padding(8, 3, 0, 3);
@@ -134,6 +137,13 @@
             this.toolStripMenuItem1.Size = new System.Drawing.Size(55, 21);
             this.toolStripMenuItem1.Text = "About";
             this.toolStripMenuItem1.Click += new System.EventHandler(this.toolStripMenuItem1_Click);
+            // 
+            // exitToolStripMenuItem
+            // 
+            this.exitToolStripMenuItem.Name = "exitToolStripMenuItem";
+            this.exitToolStripMenuItem.Size = new System.Drawing.Size(40, 21);
+            this.exitToolStripMenuItem.Text = "Exit";
+            this.exitToolStripMenuItem.Click += new System.EventHandler(this.exitToolStripMenuItem_Click);
             // 
             // label1
             // 
@@ -276,7 +286,7 @@
             this.rbBroad.AutoSize = true;
             this.rbBroad.Location = new System.Drawing.Point(169, 90);
             this.rbBroad.Name = "rbBroad";
-            this.rbBroad.Size = new System.Drawing.Size(53, 16);
+            this.rbBroad.Size = new System.Drawing.Size(65, 23);
             this.rbBroad.TabIndex = 9;
             this.rbBroad.Text = "Broad";
             this.rbBroad.UseVisualStyleBackColor = true;
@@ -286,7 +296,7 @@
             this.rbNarrow.AutoSize = true;
             this.rbNarrow.Location = new System.Drawing.Point(169, 61);
             this.rbNarrow.Name = "rbNarrow";
-            this.rbNarrow.Size = new System.Drawing.Size(59, 16);
+            this.rbNarrow.Size = new System.Drawing.Size(74, 23);
             this.rbNarrow.TabIndex = 8;
             this.rbNarrow.Text = "Narrow";
             this.rbNarrow.UseVisualStyleBackColor = true;
@@ -297,7 +307,7 @@
             this.rbPim.Checked = true;
             this.rbPim.Location = new System.Drawing.Point(169, 29);
             this.rbPim.Name = "rbPim";
-            this.rbPim.Size = new System.Drawing.Size(41, 16);
+            this.rbPim.Size = new System.Drawing.Size(52, 23);
             this.rbPim.TabIndex = 7;
             this.rbPim.TabStop = true;
             this.rbPim.Text = "PIM";
@@ -381,7 +391,7 @@
             this.rbRX.AutoSize = true;
             this.rbRX.Location = new System.Drawing.Point(133, 26);
             this.rbRX.Name = "rbRX";
-            this.rbRX.Size = new System.Drawing.Size(107, 16);
+            this.rbRX.Size = new System.Drawing.Size(119, 23);
             this.rbRX.TabIndex = 1;
             this.rbRX.TabStop = true;
             this.rbRX.Text = "RX Calibration";
@@ -393,7 +403,7 @@
             this.rbTX.AutoSize = true;
             this.rbTX.Location = new System.Drawing.Point(15, 26);
             this.rbTX.Name = "rbTX";
-            this.rbTX.Size = new System.Drawing.Size(107, 16);
+            this.rbTX.Size = new System.Drawing.Size(118, 23);
             this.rbTX.TabIndex = 0;
             this.rbTX.TabStop = true;
             this.rbTX.Text = "TX Calibration";
@@ -430,6 +440,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.SystemColors.Window;
             this.ClientSize = new System.Drawing.Size(756, 629);
+            this.ControlBox = false;
             this.Controls.Add(this.groupBox6);
             this.Controls.Add(this.groupBox2);
             this.Controls.Add(this.groupBox5);
@@ -440,14 +451,15 @@
             this.Controls.Add(this.statusStrip1);
             this.Controls.Add(this.groupBox1);
             this.Controls.Add(this.menuStrip1);
+            this.DoubleBuffered = true;
             this.Font = new System.Drawing.Font("Calibri", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.MainMenuStrip = this.menuStrip1;
             this.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Form1";
-            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.MainForm_FormClosed);
             this.Load += new System.EventHandler(this.MainForm_Load);
             this.statusStrip1.ResumeLayout(false);
             this.statusStrip1.PerformLayout();
@@ -505,6 +517,7 @@
         private System.Windows.Forms.ToolStripStatusLabel toolStripStatusLabel2;
         private System.Windows.Forms.Timer timer1;
         private System.Windows.Forms.ToolStripMenuItem fileToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem exitToolStripMenuItem;
     }
 }
 

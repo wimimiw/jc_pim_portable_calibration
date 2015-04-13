@@ -17,10 +17,35 @@ namespace PimCalibration
         public string storePath;
     }
     /// <summary>
+    /// 功率校准基准参数
+    /// </summary>
+    internal class PACalPara
+    {
+        /// <summary>
+        /// 功率表
+        /// </summary>
+        public List<float> power = new List<float>();
+        /// <summary>
+        /// 衰减表
+        /// </summary>
+        public List<float> powerAtt = new List<float>();
+        /// <summary>
+        /// 功率抖动范围
+        /// </summary>
+        public List<float> powerFloat = new List<float>();
+        /// <summary>
+        /// 频率表
+        /// </summary>
+        public List<int> freq = new List<int>();
+    }
+    /// <summary>
     /// 功放校准数据类
     /// </summary>
     class TxCalDataStruct
     {
+        /// <summary>
+        /// 功率划分枚举
+        /// </summary>
         public enum EPowerDivide
         {
             low,high
@@ -63,11 +88,15 @@ namespace PimCalibration
         /// <summary>
         /// 失败次数[TKey,TValue] = [频率，功率]
         /// </summary>
-        public Dictionary<float, float> errCollect1 = new Dictionary<float, float>();
+        //public Dictionary<float, float> errCollect1 = new Dictionary<float, float>();
         /// <summary>
         /// 失败次数[TKey,TValue] = [频率，功率]
         /// </summary>
-        public Dictionary<float, float> errCollect2 = new Dictionary<float, float>();
+        //public Dictionary<float, float> errCollect2 = new Dictionary<float, float>();
+        /// <summary>
+        /// 失败次数[PANum,  freq,  power] 
+        /// </summary>
+        public bool[, ,] errCollect = new bool[2, 50, 50];
         /// <summary>
         /// 功放1串口地址
         /// </summary>
@@ -89,21 +118,9 @@ namespace PimCalibration
         /// </summary>
         public float PowerOffsetSwitch;
         /// <summary>
-        /// 功率表
+        /// 功率校准基准参数  PA1,PA2
         /// </summary>
-        public List<float> power = new List<float>();
-        /// <summary>
-        /// 衰减表
-        /// </summary>
-        public List<float> powerAtt = new List<float>();
-        /// <summary>
-        /// 功率抖动范围
-        /// </summary>
-        public List<float> powerFloat = new List<float>();
-        /// <summary>
-        /// 频率表
-        /// </summary>
-        public List<int> freq = new List<int>();
+        public PACalPara[] PA = new PACalPara[]{new PACalPara(),new PACalPara()};
         /// <summary>
         /// 输出校准表[PANum,  freq,  power] 对应功率表和频率表 
         /// </summary>
@@ -156,7 +173,7 @@ namespace PimCalibration
             /// </summary>
             public List<int> rbw = new List<int>();
             /// <summary>
-            /// ?
+            /// 带宽
             /// </summary>
             public List<int> span = new List<int>();           
         }
